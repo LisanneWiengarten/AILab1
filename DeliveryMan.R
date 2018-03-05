@@ -1,8 +1,11 @@
 ?seq.along
+# ----- dumbDM -----
 dumbDM=function(roads,car,packages){
   car$nextMove=sample(c(2,4,6,8),1)
   return (car)
 }
+
+# ----- basicDM -----
 basicDM=function(roads,car,packages) {
   nextMove=0
   toGo=0
@@ -22,6 +25,8 @@ basicDM=function(roads,car,packages) {
   car$mem=list()
   return (car)
 }
+
+# ----- manualDM -----
 manualDM=function(roads,car,packages) {
   if (car$load>0) {
     print(paste("Current load:",car$load))
@@ -32,27 +37,63 @@ manualDM=function(roads,car,packages) {
   return (car)
 }
 
-listTest=function() {
-  myarray <- array(numeric(), dim=c(4,10))
-  myarray[,1] = c(3,5,20,30)
-  print (myarray)
-  vector1= c(3,5,20,30)
-  vector2= c(4,6,21,31)
-  new.array = array(c(vector1,vector2), dim=c(4,2))
-  print(new.array[1,1])
-  
+# ----- averageTest -----
+averageTest <- function(tests){
+  sum = 0
+  for (i in 1:tests) {
+    sum=sum+runDeliveryMan(carReady = astarDM, dim = 10, turns = 2000, doPlot = F, pause = 0, del = 5)
+    if(i%%10==0){
+      print(i)
+      print(sum/i)
+    }
+  }
+  print(sum/i)
+  return(0)
 }
-ourDM=function(roads,car,packages) {
+#averageTest(500)
+
+# ----- Helper function -----
+# Removes an item from the frontier by replacing all crucial slots with 1001
+removeFromFrontier=function(theFrontier,x,y,cost) {
+  for(i in 1:(length(theFrontier)/6)){
+    if(theFrontier[1,i]==x && theFrontier[2,i]==y && theFrontier[3,i]==cost){
+      theFrontier[,i] <- 1001
+    } 
+  }
+  return (theFrontier)
+}     
+
+# ----- astarDM -----
+# Uses a* algorithm to find the best paths
+astarDM=function(roads,car,packages) {
+  
+  # Init
   nextMove=0
   toGo=0
   offset=0
+ 
+  # If we currently do not carry a package, 
+  # we choose the next one with the smallest Manhattan distances to the package and its goal
   if (car$load==0) {
-    toGo=which(packages[,5]==0)[1]
+    min_dist = 100
+    for (i in 1:5) {
+      if (packages[i,5] == 0) {
+        dist_to_package = abs(car$x - packages[i,1]) + abs(car$y - packages[i,2])
+        dist_to_goal = abs(packages[i,1] - packages[i,3]) + abs(packages[i,2] - packages[i,4])
+        if ((dist_to_package+dist_to_goal) < min_dist) {
+          min_dist = (dist_to_package+dist_to_goal)
+          goal = i  
+        }
+      }  
+    }
+    toGo = goal
+    
   } else {
     toGo=car$load  
     offset=2
   }
   
+  # Init matrix of heuristics with Manhattan distances
   heuristics = matrix(, nrow = 10, ncol = 10)
   for(y in 1:nrow(heuristics)) {
     for(x in 1:ncol(heuristics)) {
@@ -61,75 +102,137 @@ ourDM=function(roads,car,packages) {
     }
   }
   
-  #print (packages[toGo,1+offset]) # current x
-  #print (packages[toGo,2+offset]) # current y
-  #print (heuristics[car$x,11-car$y])
-  
-  frontier = array(1000, dim=c(4,10))
+  # Each item on frontier has 5 slots: x and y position, cost, and x and y position of predecessor
+  frontier = array(1000, dim=c(6,10000))
   # First thing on frontier: current position
-  frontier[,1] <- c(car$x, car$y,  heuristics[car$x,11-car$y], heuristics[car$x,11-car$y])
-  f_len = 1
-  print (frontier)
+  frontier[,1] <- c(car$x, car$y, 0, -1, -1, 0)
+  f_len = 2
   
-  steps = 0
-  while (steps < 2) {
+  # Visited set for all nodes we have already seen
+  visited = array(1000, dim=c(6,10000))
+  v_len = 1
+  
+  # While we did not reach goal
+  foundTheGoal = -1
+  goal_x = packages[toGo,1+offset]
+  goal_y = packages[toGo,2+offset]
+  while (foundTheGoal < 0) {
     to_expand = vector()
     min_cost = 1000
-    steps = steps + 1
-    for(i in 1:length(frontier[1,])) {
-      #print (frontier[4,i])
-      if (frontier[4,i] < min_cost){
-          min_cost = frontier[4,i]
-          to_expand <- frontier[,i]
-          #print (min_cost)
-          #print (to_expand)
+    # Find node on frontier with lowest cost
+    for(i in 1:f_len) {
+      if (frontier[3,i] < min_cost){
+        min_cost = frontier[3,i]
+        to_expand <- frontier[,i]
       }
     }
-    
+  
     current_x = to_expand[1]
     current_y = to_expand[2]
+    current_cost = to_expand[3]
+    current_prev_roadcost = to_expand[6]
     
-    # to the right
+    # Add the current node to the visited set
+    visited[,v_len] <- c(current_x, current_y, current_cost, to_expand[4], to_expand[5], current_prev_roadcost)
+    v_len = v_len +1
+    # Remove the one we visited from the frontier
+    frontier = removeFromFrontier(frontier, current_x, current_y, current_cost)
+    
+    # Expand the node to the right (if possible)
     if (current_x < 10) {
-      right_x = current_x+1
-      right_y = current_y
-      right_h = heuristics[right_x, 11-right_y]
-      right_roadcost = roads$hroads[11-right_y, right_x]
+      right_h = heuristics[11-current_y, current_x+1]
+      right_roadcost = roads$hroads[11-current_y, current_x+1-1]
       right_totalcost = right_h + right_roadcost
-      
-      print (right_x)
-      print (right_y)
-      print (right_roadcost)
-      print (roads)
-      
-      frontier[,f_len] <- c(right_x, right_y, right_h, right_totalcost)
+      frontier[,f_len] <- c(current_x+1, current_y, current_prev_roadcost+right_totalcost, current_x, current_y, current_prev_roadcost+right_roadcost)
       f_len = f_len + 1
     }
     
-    # to the left
+    # Expand to the left
     if (current_x > 1) {
-      frontier[,f_len] <- c(current_x-1, current_y, 0, (roads$hroads[11-current_y, current_x-1] + heuristics[current_x-1, 11-current_y]) 
+      frontier[,f_len] <- c((current_x-1), current_y,  current_prev_roadcost+(roads$hroads[(11-current_y), current_x-1] + heuristics[(11-current_y), current_x]), current_x, current_y, (current_prev_roadcost+(roads$hroads[(11-current_y), current_x-1])))
+      f_len = f_len + 1
     }
     
-    # up
-    if (current_y )
-   
-   
+    # Expand upwards
+    if (current_y < 10) {
+      frontier[,f_len] <- c(current_x, current_y+1,  current_prev_roadcost+(roads$vroads[(10-current_y), current_x] + heuristics[(11-current_y), current_x]),current_x, current_y, current_prev_roadcost+(roads$vroads[(10-current_y), current_x]))
+      f_len = f_len + 1
+    }
+    
+    # Expand downwards
+    if (current_y > 1) {
+      frontier[,f_len] <- c(current_x, (current_y-1),  current_prev_roadcost+(roads$vroads[(10-current_y+1), current_x] + heuristics[(11-current_y+1), current_x]), current_x, current_y, current_prev_roadcost+(roads$vroads[(10-current_y+1), current_x]))
+      f_len = f_len + 1
+    }
+    
+  
+    # If the node with lowest cost (the current node) is also the goal node, we are done
+    if(current_x == goal_x && current_y == goal_y) {
+      foundTheGoal = 1
+    }
+    
+  } # while did not find goal
+  
+  # Here the visited set is completed
+  # We start looking at the goal node, find the goal node in visited set with lowest cost,
+  # and look what point led there. Then we repeat with that node until the start node
+  predecessor_x = goal_x
+  predecessor_y = goal_y
+  foundWhereToGo = -1
+  whatsTheMove = 2
+  
+  while(foundWhereToGo < 0) {
+    previous_predecessor_x = -1
+    previous_predecessor_y = -1
+    # min_cost is used to look for all the visited nodes with correct x,y and to only pick the one with lowest cost
+    min_cost = 1000
+    max_loops = 0
+    
+    for(i in 1:v_len) {
+      if (visited[3,i] < min_cost && min_cost > 0 && visited[1,i] == predecessor_x && visited[2,i] == predecessor_y) {
+        min_cost = visited[3,i]
+        # When we find a match in x,y node with lower cost we update 
+        previous_predecessor_x = visited[4,i]
+        previous_predecessor_y = visited[5,i]
+        }
+    }
+    max_loops = max_loops + 1
+    
+    # If this new predecessor is the same as the car pos, we are done 
+    if ((previous_predecessor_x == car$x && previous_predecessor_y == car$y) || max_loops == 10) {
+      foundWhereToGo = 1
+      
+      # If the car's position has high x, then the node we should go to the left
+      if (predecessor_x < previous_predecessor_x) {
+        whatsTheMove = 4
+      }
+      # Go right
+      if (predecessor_x > previous_predecessor_x) {
+        whatsTheMove = 6
+      }
+      # Go up
+      if (predecessor_y > previous_predecessor_y) {
+        whatsTheMove = 8
+      }
+      # Go down
+      if (predecessor_y < previous_predecessor_y) {
+        whatsTheMove = 2
+      }
+    }
+    
+    # The last value these have will be the best route to the node
+    # We update and look at this node 
+    predecessor_x = previous_predecessor_x
+    predecessor_y = previous_predecessor_y
+    
   }
   
-  
-  
-  # COPIED FROM ABOVE. CHANGE LATER!
-  if (car$x<packages[toGo,1+offset]) {nextMove=6}
-  else if (car$x>packages[toGo,1+offset]) {nextMove=4}
-  else if (car$y<packages[toGo,2+offset]) {nextMove=8}
-  else if (car$y>packages[toGo,2+offset]) {nextMove=2}
-  else {nextMove=5}
+  nextMove = whatsTheMove
   car$nextMove=nextMove
   car$mem=list()
   return (car)
   
-}
+} # astarDM
 
 #' Run Delivery Man
 #' 
@@ -267,7 +370,9 @@ makeRoadGrid<-function() {
 }
 #' @export
 makeDotGrid<-function(n,i) {
-  plot(rep(seq(1,n),each=n),rep(seq(1,n),n),xlab="X",ylab="Y",main=paste("Delivery Man. Turn ", i,".",sep=""))
+  x <- 1:n
+  #plot(rep(seq(1,n),each=n),rep(seq(1,n),n),xlab="X",ylab="Y",main=paste("Delivery Man. Turn ", i,".",sep=""))
+  plot(rep(seq(1,n),each=n),rep(seq(1,n),n), ylim=rev(range(x)),xlab="X",ylab="Y",main=paste("Delivery Man. Turn ", i,".",sep=""))
 }
 
 #' @export
@@ -325,5 +430,4 @@ updateRoads<-function(hroads,vroads) {
   }
   list (hroads=hroads,vroads=vroads)
 }
-
 
